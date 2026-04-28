@@ -1,0 +1,123 @@
+:root {
+  --beige-light: #f5f5dc;
+  --beige-dark: #e8e8cc;
+  --brown-primary: #5d4037;
+  --brown-light: #8d6e63;
+  --white: #fffaf0;
+}
+
+body {
+  background-color: var(--beige-light);
+  color: var(--brown-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  margin: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.todo-container {
+  background: var(--white);
+  width: 400px;
+  margin-top: 50px;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(93, 64, 55, 0.1);
+}
+
+h2 {
+  text-align: center;
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+
+.input-group {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 1.5rem;
+}
+
+input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--beige-dark);
+  border-radius: 4px;
+  background: var(--beige-light);
+  outline: none;
+}
+
+button {
+  background: var(--brown-primary);
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+button:hover {
+  background: var(--brown-light);
+}
+
+.todo-item {
+  list-style: none;
+  padding: 10px;
+  border-bottom: 1px solid var(--beige-dark);
+  display: flex;
+  justify-content: space-between;
+}
+
+.sub-section {
+  margin-top: 30px;
+  border-top: 2px dashed var(--beige-dark);
+  padding-top: 20px;
+  text-align: center;
+}
+
+.premium-btn {
+  background: #d7ccc8;
+  color: #3e2723;
+  font-weight: bold;
+}
+
+.todo-item.completed {
+  text-decoration: line-through;
+  color: #a1887f; /* Muted brown for completed tasks */
+  opacity: 0.6;
+}
+
+.item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.delete-btn {
+  background: transparent;
+  color: #8d6e63;
+  font-size: 0.8rem;
+  padding: 2px 8px;
+}
+
+.delete-btn:hover {
+  background: #efebe9;
+  color: #3e2723;
+}
+
+/* Minimalist Checkbox Styling */
+input[type="checkbox"] {
+  accent-color: var(--brown-primary);
+  cursor: pointer;
+}
+
+form input {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+form input:focus {
+  border: 1px solid var(--brown-light);
+  background: #fff;
+}
+
