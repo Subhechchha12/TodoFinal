@@ -1,12 +1,34 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios'; 
 
 const Login = () => {
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [mfaState, setMfaState] = useState({ mfaRequired: false, isSetup: false, tempToken: '', qrCode: '' });
   const [mfaCode, setMfaCode] = useState('');
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  // Handle Google OAuth MFA redirect — pick up params from URL
+  useEffect(() => {
+    const mfaRequired = searchParams.get('mfaRequired');
+    if (mfaRequired === 'true') {
+      setMfaState({
+        mfaRequired: true,
+        isSetup: searchParams.get('isSetup') === 'true',
+        tempToken: searchParams.get('tempToken') || '',
+        qrCode: searchParams.get('qrCode') || ''
+      });
+      // Clean the URL without triggering navigation
+      window.history.replaceState({}, '', '/');
+    }
+
+    // If user already has a valid token, redirect to todos
+    const existingToken = localStorage.getItem('token');
+    if (existingToken && mfaRequired !== 'true') {
+      navigate('/todos', { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   const onChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -53,7 +75,7 @@ const Login = () => {
       <div className="todo-container" style={{ marginTop: '100px', textAlign: 'center' }}>
         <h2 style={{ marginBottom: '1rem' }}>Two-Factor Authentication</h2>
         
-        {mfaState.isSetup && (
+        {mfaState.isSetup && mfaState.qrCode && (
           <div style={{ marginBottom: '2rem' }}>
             <p style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
               Scan this QR code with your authenticator app (like Google Authenticator or Authy) to set up MFA.
@@ -65,6 +87,12 @@ const Login = () => {
         {!mfaState.isSetup && (
           <p style={{ fontSize: '0.9rem', marginBottom: '1.5rem' }}>
             Enter the 6-digit code from your authenticator app.
+          </p>
+        )}
+
+        {mfaState.isSetup && !mfaState.qrCode && (
+          <p style={{ fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+            Open your authenticator app and enter the 6-digit code to complete setup.
           </p>
         )}
 

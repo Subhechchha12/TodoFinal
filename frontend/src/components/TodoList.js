@@ -13,25 +13,35 @@ const TodoList = () => {
   // 1. Handle OAuth Redirect & Initial Data Fetch
   useEffect(() => {
     const initFetch = async () => {
-      // Check if token is in URL (from Google redirect)
+      // Check if token is in URL (from Google redirect — legacy fallback)
       const urlToken = searchParams.get('token');
       if (urlToken) {
         localStorage.setItem('token', urlToken);
-        navigate('/', { replace: true }); // Clean URL
+        // Bug 6 FIX: navigate to /todos, not /
+        navigate('/todos', { replace: true });
+        return; // Will re-run after navigate
       }
 
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        // No token — redirect to login
+        navigate('/', { replace: true });
+        return;
+      }
 
       try {
         const res = await axios.get('http://localhost:5000/api/todos', {
           headers: { 'x-auth-token': token }
         });
-        // Assuming backend returns { todos: [], isPremium: boolean }
         setTodos(res.data.todos || res.data); 
         setIsPremium(res.data.isPremium || false);
       } catch (err) {
         console.error("Auth error or server down", err);
+        // If token is invalid/expired, clear it and go to login
+        if (err.response?.status === 401) {
+          localStorage.removeItem('token');
+          navigate('/', { replace: true });
+        }
       }
     };
 
@@ -60,14 +70,40 @@ const TodoList = () => {
     }
   };
 
-  const toggleComplete = (id) => {
-    setTodos(todos.map(todo => 
-      todo._id === id ? { ...todo, completed: !todo.completed } : todo
-    ));
+  // Bug 4 FIX: Toggle now persists to backend
+  const toggleComplete = async (id) => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await axios.put(`http://localhost:5000/api/todos/${id}`, {}, {
+        headers: { 'x-auth-token': token }
+      });
+      setTodos(todos.map(todo => 
+        todo._id === id ? res.data : todo
+      ));
+    } catch (err) {
+      console.error("Toggle failed:", err);
+      alert("Failed to update todo. Please try again.");
+    }
   };
 
-  const deleteTodo = (id) => {
-    setTodos(todos.filter(todo => todo._id !== id));
+  // Bug 4 FIX: Delete now persists to backend
+  const deleteTodo = async (id) => {
+    const token = localStorage.getItem('token');
+    try {
+      await axios.delete(`http://localhost:5000/api/todos/${id}`, {
+        headers: { 'x-auth-token': token }
+      });
+      setTodos(todos.filter(todo => todo._id !== id));
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Failed to delete todo. Please try again.");
+    }
+  };
+
+  // Bug 10 FIX: Logout
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    navigate('/', { replace: true });
   };
 
   const handleSubscription = async () => {
@@ -96,8 +132,6 @@ const TodoList = () => {
         name: "TaskFlow Premium",
         description: "Test Mode Payment",
         order_id: res.data.id,
-        // Removed prefill and config to allow the normal Razorpay flow.
-        // This will show the screen asking for phone number and email first.
         handler: async function (response) {
           try {
             await axios.post('http://localhost:5000/api/payment/verify', {
@@ -120,7 +154,6 @@ const TodoList = () => {
       const rzp = new window.Razorpay(options);
       rzp.open();
     } catch (err) {
-      // Show the real error so we can debug it
       const msg = err?.response?.data?.msg
         || err?.response?.data
         || err?.message
@@ -132,9 +165,23 @@ const TodoList = () => {
 
   return (
     <div className="todo-container">
-      <h2>Daily Tasks {isPremium && <span className="premium-badge">✨</span>}</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ margin: 0 }}>Daily Tasks {isPremium && <span className="premium-badge">✨</span>}</h2>
+        <button 
+          onClick={handleLogout} 
+          style={{ 
+            background: 'transparent', 
+            color: '#8d6e63', 
+            fontSize: '0.8rem', 
+            padding: '6px 12px',
+            border: '1px solid #d7ccc8'
+          }}
+        >
+          Logout
+        </button>
+      </div>
       
-      {/* Updated Input Group with Date Logic */}
+      {/* Input Group with Date Logic */}
       <div className="input-group">
         <input 
           type="text" 
@@ -144,10 +191,10 @@ const TodoList = () => {
           onKeyPress={(e) => e.key === 'Enter' && addTodo()}
         />
         {isPremium && (
-          <input 
-            type="date" 
-            value={dueDate} 
-            onChange={(e) => setDueDate(e.target.value)} 
+          <input 
+            type="date" 
+            value={dueDate} 
+            onChange={(e) => setDueDate(e.target.value)} 
             className="date-input"
           />
         )}
