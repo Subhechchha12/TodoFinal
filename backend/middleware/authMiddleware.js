@@ -12,6 +12,12 @@ module.exports = function (req, res, next) {
   // Verify token
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Reject temporary MFA tokens — they are only valid for /mfa/verify
+    if (decoded.isTemp) {
+      return res.status(401).json({ msg: 'MFA verification required. Complete MFA before accessing this resource.' });
+    }
+
     req.user = decoded.user; // Attach user id to the request
     next();
   } catch (err) {

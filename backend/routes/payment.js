@@ -5,10 +5,17 @@ const Razorpay = require('razorpay');
 const auth = require('../middleware/authMiddleware');
 const User = require('../models/User');
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Lazy-init Razorpay instance to ensure env vars are loaded
+let razorpayInstance = null;
+function getRazorpay() {
+  if (!razorpayInstance) {
+    razorpayInstance = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+  }
+  return razorpayInstance;
+}
 
 // @route   POST api/payment/order
 // @desc    Create a Razorpay Order
@@ -20,7 +27,7 @@ router.post('/order', auth, async (req, res) => {
       receipt: `receipt_${Date.now()}`,
     };
 
-    const order = await razorpay.orders.create(options);
+    const order = await getRazorpay().orders.create(options);
     res.json(order);
   } catch (err) {
     console.error("Order creation failed:", err);

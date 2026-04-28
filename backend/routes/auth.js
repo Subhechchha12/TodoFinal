@@ -6,8 +6,19 @@ const otplib = require('otplib');
 const qrcode = require('qrcode');
 const User = require('../models/User');
 const { usernameExists, addUsername } = require('../config/upstash');
+const auth = require('../middleware/authMiddleware');
 
 const router = express.Router();
+
+// Helper: sign a JWT and return a promise
+function signToken(payload, expiresIn) {
+  return new Promise((resolve, reject) => {
+    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn }, (err, tok) => {
+      if (err) return reject(err);
+      resolve(tok);
+    });
+  });
+}
 
 // @route   POST api/auth/register
 router.post('/register', async (req, res) => {
@@ -45,13 +56,7 @@ router.post('/register', async (req, res) => {
     const qrCode = await qrcode.toDataURL(otpauth);
 
     const payload = { user: { id: user.id }, isTemp: true };
-
-    const tempToken = await new Promise((resolve, reject) => {
-      jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 600 }, (err, tok) => { // 10 minutes temp token
-        if (err) return reject(err);
-        resolve(tok);
-      });
-    });
+    const tempToken = await signToken(payload, 600); // 10 minutes temp token
 
     return res.json({ 
       mfaRequired: true, 
@@ -98,13 +103,7 @@ router.post('/login', async (req, res) => {
     }
 
     const payload = { user: { id: user.id }, isTemp: true };
-
-    const tempToken = await new Promise((resolve, reject) => {
-      jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 600 }, (err, tok) => {
-        if (err) return reject(err);
-        resolve(tok);
-      });
-    });
+    const tempToken = await signToken(payload, 600);
 
     return res.json({ 
       mfaRequired: true, 
@@ -135,10 +134,14 @@ router.post('/mfa/verify', async (req, res) => {
     const user = await User.findById(decoded.user.id);
     if (!user) return res.status(404).json({ msg: 'User not found' });
 
+    // Bug 1 FIX: otplib.verify() returns a Promise<{ valid, delta, ... }> in v13
+    // Must await it and check .valid property
     let isValid = false;
     try {
-      isValid = otplib.verify({ token: mfaCode, secret: user.mfaSecret });
+      const result = await otplib.verify({ token: mfaCode, secret: user.mfaSecret });
+      isValid = result.valid;
     } catch (e) {
+      console.error('MFA verify error:', e);
       return res.status(400).json({ msg: 'Invalid MFA Code' });
     }
     
@@ -149,20 +152,13 @@ router.post('/mfa/verify', async (req, res) => {
       await user.save();
     }
 
-    const payload = { user: { id: user.id } };
-
-    const token = await new Promise((resolve, reject) => {
-      jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 36000 }, (err, tok) => {
-        if (err) return reject(err);
-        resolve(tok);
-      });
-    });
+    const payload = { user: { id: user.id } }; // No isTemp — this is the real token
+    const token = await signToken(payload, 36000);
 
     // Persist token list (best-effort)
     User.findByIdAndUpdate(
       user.id,
-      { $push: { tokens: { $each: [{ token, createdAt: new Date() }], $position: 0, $slice: 5 } } },
-      { new: false }
+      { $push: { tokens: { $each: [{ token, createdAt: new Date() }], $position: 0, $slice: 5 } } }
     ).catch(() => {});
 
     return res.json({ token });
@@ -172,19 +168,68 @@ router.post('/mfa/verify', async (req, res) => {
   }
 });
 
+// @route   GET api/auth/me
+// @desc    Get current user info (requires full JWT, not temp token)
+router.get('/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password -mfaSecret -tokens');
+    if (!user) return res.status(404).json({ msg: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    res.status(500).send('Server Error');
+  }
+});
+
 // @route   GET api/auth/google
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 // @route   GET api/auth/google/callback
+// Bug 2 & 5 FIX: Google OAuth users now go through MFA flow too.
+// We redirect to the frontend with a temp token so MFA can be completed there.
 router.get(
   '/google/callback',
   passport.authenticate('google', { failureRedirect: 'http://localhost:3000', session: true }),
-  (req, res) => {
-    const payload = { user: { id: req.user.id } };
-    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 36000 }, (err, token) => {
-      if (err) return res.status(500).send('Server Error');
-      res.json({ token });
-    });
+  async (req, res) => {
+    try {
+      const user = req.user;
+
+      // Ensure Google OAuth user has an MFA secret
+      if (!user.mfaSecret) {
+        user.mfaSecret = otplib.generateSecret();
+        user.mfaSetupComplete = false;
+        await user.save();
+      }
+
+      const isSetup = !user.mfaSetupComplete;
+
+      // Generate QR code if MFA setup is needed
+      let qrCode = '';
+      if (isSetup) {
+        const otpauth = otplib.generateURI({ issuer: 'TaskFlow', label: user.username || user.email, secret: user.mfaSecret });
+        qrCode = await qrcode.toDataURL(otpauth);
+      }
+
+      // Issue temp token for MFA verification
+      const payload = { user: { id: user.id }, isTemp: true };
+      const tempToken = await signToken(payload, 600);
+
+      // Redirect to frontend with MFA params in URL
+      const params = new URLSearchParams({
+        mfaRequired: 'true',
+        isSetup: String(isSetup),
+        tempToken,
+      });
+
+      // QR code data URLs are large — only include if needed
+      if (qrCode) {
+        params.set('qrCode', qrCode);
+      }
+
+      res.redirect(`http://localhost:3000/?${params.toString()}`);
+    } catch (err) {
+      console.error('Google callback error:', err);
+      res.redirect('http://localhost:3000/?error=auth_failed');
+    }
   }
 );
 
